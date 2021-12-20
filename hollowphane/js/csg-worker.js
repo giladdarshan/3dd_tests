@@ -1,4 +1,3 @@
-console.log('b');
 import {CSG} from "./csg-lib.js"
 
 
