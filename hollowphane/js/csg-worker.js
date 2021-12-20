@@ -1,4 +1,5 @@
-import {CSG} from "/js/csg-lib.js"
+console.log('b');
+import {CSG} from "./csg-lib.js"
 
 
 let gWorkersStarted = false;
