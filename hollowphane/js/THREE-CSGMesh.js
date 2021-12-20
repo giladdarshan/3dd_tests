@@ -1,7 +1,6 @@
 "use strict"
 
 let { BufferGeometry, Vector3, Vector2} = THREE;
-console.log('a');
 import {CSG, Vertex, Vector, Polygon} from "./csg-lib.js"
 //import {Geometry} from "../three.js-dev/examples/jsm/deprecated/Geometry.js";
 
