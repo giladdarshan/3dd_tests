@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>Hollowphane Maker</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+	<style>
+		body {
+			margin: 0;
+			background-color: #000;
+			color: #fff;
+			font-family: Monospace;
+			font-size: 13px;
+			line-height: 24px;
+		}
+
+		canvas {
+			display: block;
+		}
+	</style>
+</head>
+
+<body>
+
+	<input type="file" id="theInputFiles" style="display:none">
+	<script src="./js/three.min.js"></script>
+	<script type="module">
+
+		// import * as THREE from './lib/three/three.module.js';
+
+		// import Stats from './lib/three/libs/stats.module.js';
+		import { GUI } from './js/dat.gui.module.js';
+		import { OrbitControls } from './js/OrbitControls.js';
+		import { STLExporterOptimized } from './js/STLExporterOptimized.js';
+
+
+		import { Shapes } from './js/3ddShapes.js';
+		import { Utils } from './js/3ddUtils.js';
+		import CSG from './js/THREE-CSGMesh.js';
+		import * as BufferGeometryUtils from './js/BufferGeometryUtils.js';
+		// import { STLExporter } from './js/STLExporter.js';
+		const GDShapes = new Shapes(CSG, BufferGeometryUtils);
+		const GDUtils = new Utils(GDShapes);
+		GDShapes.material = "phong";
+		GDShapes.color = 0xD5D5D5;
+		GDShapes.addWireframe = false;
+		// const exporterSTL = new STLExporter();
+		// var container, stats, gui, guiData, controlGuiData, inputFiles, loadImageBtn, info;
+		var container, gui, guiData, controlGuiData, inputFiles, loadImageBtn, info;
+		var camera, scene, renderer, controls;
+
+		var image, imageName, canvas, canvasFlipped, imageGrayValues, imageGrayValuesFlipped;
+
+		var theMesh, theMeshFlipped;
+		var materialPhong;
+		var materialTranslucent;
+		var vertexBuffer, vertexBufferFlipped;
+
+		var baseSizeCm = 40;
+
+		let meshIsTransparent = true;
+
+		init();
+		animate();
+
+		function init() {
+
+			// changeFavicon("./favicon.png");
+
+			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.5, 2000);
+			camera.position.set(0, 120, 180);
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color(0x87CEFA);
+
+			var sun = new THREE.DirectionalLight(0xFFFFFF, 1.0);
+			sun.position.set(30, 12, 63);
+			scene.add(sun);
+
+			var sun2 = new THREE.DirectionalLight(0xFFFFFF, 1.0);
+			sun2.position.set(-20, 25, - 13);
+			scene.add(sun2);
+
+			// var baseGeometry = new THREE.BoxBufferGeometry(baseSizeCm * 10, 10, baseSizeCm * 10);
+			// var texLoader = new THREE.TextureLoader();
+			// var baseTexture = texLoader.load("./textures/grid.png");
+			// baseTexture.wrapS = THREE.RepeatWrapping;
+			// baseTexture.wrapT = THREE.RepeatWrapping;
+			// baseTexture.repeat.x = baseSizeCm;
+			// baseTexture.repeat.y = baseSizeCm;
+			// var baseMaterial = new THREE.MeshLambertMaterial({ map: baseTexture });
+			// var base = new THREE.Mesh(baseGeometry, baseMaterial);
+			// base.position.y = - 5; //?
+			// scene.add(base);
+			const gridHelperSize = 400;
+			const gridHelperDivisions = 180;
+			const gridHelper = new THREE.GridHelper(gridHelperSize, gridHelperDivisions, "black", "gray");
+			scene.add(gridHelper);
+
+			materialPhong = new THREE.MeshPhongMaterial({ color: new THREE.Color(0xD5D5D5) });
+
+			var lithofunVertexShader = `
+
+					varying vec2 vUv;
+
+					void main() {
+
+						vUv = uv;
+						gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+					}
+
+				`;
+
+			var lithofunFragmentShader = `
+
+					uniform sampler2D theMap;
+					varying vec2 vUv;
+
+					void main() {
+
+						float gray = texture2D( theMap, vUv ).g;
+
+						vec3 finalColor = vec3( 1.0, 1.0, 1.0 );
+
+						gl_FragColor = vec4( ( 1.0 - gray * 0.7 ) * finalColor, gray * 0.2 + 0.8 );
+
+					}
+				`;
+
+			materialTranslucent = new THREE.ShaderMaterial({
+				transparent: true,
+				vertexShader: lithofunVertexShader,
+				fragmentShader: lithofunFragmentShader,
+				uniforms: {
+					theMap: { value: null }
+				}
+			});
+
+			createGUI();
+
+		}
+
+		function createGUI() {
+
+			container = document.createElement('div');
+			document.body.appendChild(container);
+
+			renderer = new THREE.WebGLRenderer();
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			container.appendChild(renderer.domElement);
+
+			controls = new OrbitControls(camera, renderer.domElement);
+
+			// stats = new Stats();
+			// container.appendChild(stats.dom);
+
+			window.addEventListener('resize', onWindowResize, false);
+
+			gui = new GUI();
+			gui.width = 500;
+
+			guiData = {
+				loadImage: loadImage,
+				hollowphaneWidth: 60,
+				hollowphaneDepth: 10,
+				borderBuffer: 5,
+				hollowInset: 0.1,
+				lithophaneWidth: 50,
+				minThickness: 0,
+				maxThickness: 5,
+				xyAngle: 0,
+				zStartAngle: 90,
+				zEndAngle: 90,
+				invertImage: false,
+
+				transparent: meshIsTransparent,
+				drainHoles: true,
+
+				saveSTL: saveSTL
+			};
+			controlGuiData = Object.assign({}, guiData);
+			loadImageBtn = gui.add(guiData, "loadImage").name("Load PNG or JPEG image...");
+			gui.add(guiData, "hollowphaneWidth", 10, 1000, 1).name("Hollowphane width (mm): ").onFinishChange((arg) => {
+				if (arg !== controlGuiData.hollowphaneWidth) {
+					controlGuiData.hollowphaneWidth = arg;
+					imageLoaded();
+				}
+			});
+			gui.add(guiData, "hollowphaneDepth", 2, 1000, 1).name("Hollowphane depth (mm): ").onFinishChange((arg) => {
+				if (arg !== controlGuiData.hollowphaneDepth) {
+					controlGuiData.hollowphaneDepth = arg;
+					imageLoaded();
+				}
+			});
+			gui.add(guiData, "borderBuffer", 0.1, 1000, 0.1).name("Border size (mm): ").onFinishChange((arg) => {
+				if (arg !== controlGuiData.borderBuffer) {
+					controlGuiData.borderBuffer = arg;
+					imageLoaded();
+				}
+			});
+			gui.add(guiData, "hollowInset", 0, 10, 0.01).name("Hollowed image inset (mm): ").onFinishChange((arg) => {
+				if (arg !== controlGuiData.hollowInset) {
+					controlGuiData.hollowInset = arg;
+					imageLoaded();
+				}
+			});
+
+
+			// gui.add(guiData, "lithophaneWidth", 10, 600, 1).name("Lithophane width (mm): ").onFinishChange(imageLoaded);
+			// gui.add(guiData, "minThickness", 0.0, 8, 0.1).name("Min. thickness (mm): ").onFinishChange(imageLoaded);
+			gui.add(guiData, "maxThickness", 0.2, 900, 0.1).name("Max. hollow thickness (mm): ").onFinishChange((arg) => {
+				if (arg !== controlGuiData.maxThickness) {
+					controlGuiData.maxThickness = arg;
+					imageLoaded();
+				}
+			});
+			gui.add(guiData, "drainHoles").name("Add base drain holes: ").onFinishChange(imageLoaded);
+			// gui.add(guiData, "xyAngle", 0, 360, 1).name("XY angle: ").onFinishChange(updateMesh);
+			// gui.add(guiData, "zEndAngle", 0, 180, 1).name("Z top angle: ").onFinishChange(updateMesh);
+			// gui.add(guiData, "zStartAngle", 0, 180, 1).name("Z bottom angle: ").onFinishChange(updateMesh);
+			gui.add(guiData, "invertImage").name("Invert image: ").onChange(function invertImageChanged() {
+				imageLoaded();
+			});
+
+			var transparentControl = gui.add(guiData, "transparent").name("Transparent: ").onChange(function realisticChanged() {
+
+				if (theMesh) {
+
+					// theMesh.material = realisticControl.getValue() ? materialTranslucent : materialPhong;
+					if (transparentControl.getValue()) {
+						meshIsTransparent = true;
+						theMesh.material.transparent = true;
+						theMesh.material.opacity = 0.5;
+					}
+					else {
+						meshIsTransparent = false;
+						theMesh.material.transparent = false;
+						theMesh.material.opacity = 1;
+					}
+
+				}
+
+			});
+
+			gui.add(guiData, "saveSTL").name("Save to STL...");
+			// gui.add(guiData, "viewSource").name("View source code and docs...");
+
+			inputFiles = document.getElementById('theInputFiles');
+			inputFiles.addEventListener('change', inputFilesChanged, false);
+
+			info = document.createElement('div');
+			setInfo('Click on the "Load image" button to start...');
+			document.body.appendChild(info);
+
+		}
+
+		function loadImage() {
+
+			if (image) {
+
+				document.location.reload();
+
+			}
+			else {
+
+				inputFiles.click();
+
+			}
+
+		}
+
+		function inputFilesChanged() {
+
+			var file = event.target.files[0];
+
+			if (file) {
+
+				var reader = new FileReader();
+
+				reader.onload = function (event) {
+
+					image = new Image();
+
+					loadImageBtn.name("Start over again");
+
+					image.addEventListener('load', function (event) {
+
+						imageName = file.name;
+
+						imageLoaded();
+
+					}, false);
+
+					image.addEventListener('error', function (event) {
+
+						alert("Error while loading the image: " + file.name);
+
+					}, false);
+
+					image.src = event.target.result;
+
+				}
+
+				reader.onerror = function (event) {
+
+					alert("Error while loading the file: " + file.name);
+
+				}
+
+				reader.readAsDataURL(file);
+
+			}
+
+		}
+
+		function imageLoaded() {
+			scene.remove(theMesh);
+			scene.remove(theMeshFlipped);
+			let newLoad = false;
+			if (image == undefined) {
+				return;
+			}
+			if (image.width < 2 || image.height < 2) {
+
+				image = null;
+				alert("Minimum image size is 2 pixels wide");
+				return;
+
+			}
+
+			var doCreateMesh = canvas === undefined;
+			var numPixels = image.width * image.height;
+
+			if (doCreateMesh) {
+
+				canvas = document.createElement('canvas');
+				canvas.width = image.width;
+				canvas.height = image.height;
+
+				canvasFlipped = document.createElement('canvas');
+				canvasFlipped.width = image.width;
+				canvasFlipped.height = image.height;
+
+
+				imageGrayValues = new Float32Array(numPixels);
+				imageGrayValuesFlipped = new Float32Array(numPixels);
+				newLoad = true;
+			}
+
+			var canvasCtx2d = canvas.getContext('2d');
+			canvasCtx2d.drawImage(image, 0, 0);
+			var imageData = canvasCtx2d.getImageData(0, 0, image.width, image.height);
+			var canvasPixels = imageData.data;
+
+			var canvasCtx2dFlipped = canvasFlipped.getContext('2d');
+			if (newLoad) {
+				canvasCtx2dFlipped.translate(canvasFlipped.width, 0);
+				canvasCtx2dFlipped.scale(-1, 1);
+			}
+			canvasCtx2dFlipped.drawImage(image, 0, 0);
+			var imageDataFlipped = canvasCtx2dFlipped.getImageData(0, 0, image.width, image.height);
+			var canvasPixelsFlipped = imageDataFlipped.data;
+
+			var invert = guiData.invertImage;
+
+			var width = image.width;
+			var height = image.height;
+
+			var p = 0;
+			var pDest = image.width * (image.height - 1);
+			for (var j = 0; j < height; j++) {
+
+				for (var i = 0; i < width; i++) {
+
+					var gray = (canvasPixels[p] + canvasPixels[p + 1] + canvasPixels[p + 2]) / 767;
+					var grayFlipped = (canvasPixelsFlipped[p] + canvasPixelsFlipped[p + 1] + canvasPixelsFlipped[p + 2]) / 767;
+
+					if (invert) {
+
+						gray = 1 - gray;
+						grayFlipped = 1 - grayFlipped;
+
+					}
+
+					imageGrayValuesFlipped[pDest] = grayFlipped;
+
+					imageGrayValues[pDest++] = gray;
+
+					gray *= 255;
+					grayFlipped *= 255;
+
+					canvasPixelsFlipped[p] = grayFlipped;
+					canvasPixelsFlipped[p + 1] = grayFlipped;
+					canvasPixelsFlipped[p + 2] = grayFlipped;
+
+					canvasPixels[p++] = gray;
+					canvasPixels[p++] = gray;
+					canvasPixels[p++] = gray;
+					p++;
+
+				}
+
+				pDest -= 2 * width;
+
+			}
+
+			canvasCtx2d.putImageData(imageData, 0, 0);
+			canvasCtx2dFlipped.putImageData(imageDataFlipped, 0, 0);
+
+			materialTranslucent.uniforms.theMap.value = new THREE.CanvasTexture(canvas);
+
+			var w = Math.round(0.15 * window.innerWidth, 6);
+			var h = Math.round(w * image.height / image.width, 6);
+
+			canvas.style.width = w + "px";
+			canvas.style.height = h + "px";
+			canvas.style.display = "block";
+			canvas.style.position = "absolute";
+			canvas.style.bottom = "0%";
+			canvas.style.left = "0%";
+
+			if (theMesh) {
+				console.log("remove mesh");
+				scene.remove(theMesh);
+				theMesh = null;
+				scene.remove(theMeshFlipped);
+				theMeshFlipped = null;
+
+				vertexBuffer = null;
+				vertexBufferFlipped = null;
+				var geometries = createGeometry();
+
+				theMesh = new THREE.Mesh(geometries[0], guiData.realistic ? materialTranslucent : materialPhong);
+				theMesh.matrixAutoUpdate = false;
+				theMesh.updateMatrix();
+
+				theMeshFlipped = new THREE.Mesh(geometries[1], guiData.realistic ? materialTranslucent : materialPhong);
+				theMeshFlipped.matrixAutoUpdate = false;
+				theMeshFlipped.updateMatrix();
+			}
+
+			if (doCreateMesh) {
+				// if (theMesh) {
+				// 	console.log("remove mesh");
+
+
+				// }
+
+				document.body.appendChild(canvas);
+
+
+				// theMesh = createMesh(guiData.realistic ? materialTranslucent : materialPhong);
+				var geometries = createGeometry();
+
+				theMesh = new THREE.Mesh(geometries[0], guiData.realistic ? materialTranslucent : materialPhong);
+				theMesh.matrixAutoUpdate = false;
+				theMesh.updateMatrix();
+
+				theMeshFlipped = new THREE.Mesh(geometries[1], guiData.realistic ? materialTranslucent : materialPhong);
+				theMeshFlipped.matrixAutoUpdate = false;
+				theMeshFlipped.updateMatrix();
+
+			}
+
+			updateMesh();
+			// theMesh.updateMatrix();
+
+			if (theMesh.parent !== scene) {
+				console.log("orphan?");
+				scene.add(theMesh);
+
+			}
+
+			var bb = theMesh.geometry.boundingBox;
+
+			var bbx = bb.max.x - bb.min.x;
+			var bby = bb.max.y - bb.min.y;
+			var bbz = bb.max.z - bb.min.z;
+
+			function prettyMM(mm) {
+
+				return Math.round(mm * 10) / 10;
+
+			}
+
+			setInfo("Image: " + imageName + " " + image.width + "x" + image.height + " pixels" + " B.Box: " + prettyMM(bbx) + " x " + prettyMM(bbz) + " x " + prettyMM(bby) + " mm. Triangles: " + (theMesh.geometry.getIndex().array.length / 3));
+			setInfo(`Image: ${imageName}, ${image.width}x${image.height} pixels; Hollowphane size: ${prettyMM(bbx)}(W)x${prettyMM(bbz)}(D)x${prettyMM(bby)}(H) mm; Triangles: ${(theMesh.geometry.getIndex().array.length / 3)}`);
+
+			if (doCreateMesh) {
+
+				controls.target.set(0, bby, 0).multiplyScalar(0.5);
+				controls.update();
+
+			}
+
+		}
+
+		// function createMesh(material) {
+
+		// 	var geometry = createGeometry();
+
+		// 	return new THREE.Mesh(geometry, material);
+
+		// }
+
+		function createGeometry() {
+			let hollowphane = true;
+			var pointsX = image.width;
+			var pointsY = image.height;
+			var halfX = pointsX * 0.5;
+			var pointsPerPlane = pointsX * pointsY;
+			var segmentsPerRow = pointsX - 1;
+			var segmentsPerColumn = pointsY - 1;
+
+			let geometry = new THREE.BufferGeometry();
+			let geometryFlipped = new THREE.BufferGeometry();
+
+			var indices = [];
+			vertexBuffer = new Float32Array(2 * pointsPerPlane * 3);
+			var uvs = [];
+			var normals = [];
+
+			var indicesFlipped = [];
+			vertexBufferFlipped = new Float32Array(2 * pointsPerPlane * 3);
+			var uvsFlipped = [];
+			var normalsFlipped = [];
+
+			// Vertices, normals and uvs
+			var p = 0;
+			var dv = 1 / segmentsPerColumn;
+			var du = 1 / segmentsPerRow;
+
+			for (var plane = 0; plane < 2; plane++) {
+
+				var z = - plane;
+
+				var v = 0;
+
+				for (var j = 0; j < pointsY; j++) {
+
+					var u = 0;
+
+					for (var i = 0; i < pointsX; i++) {
+
+						// Only uvs are valid here. Positions and normals are actually populated in updateMesh()
+						vertexBufferFlipped[p] = i - halfX;
+						vertexBufferFlipped[p + 1] = j;
+						vertexBufferFlipped[p + 2] = z;
+						uvsFlipped.push(u, v);
+						normalsFlipped.push(0, 0, 1);
+
+						vertexBuffer[p++] = i - halfX;
+						vertexBuffer[p++] = j;
+						vertexBuffer[p++] = z;
+
+						// vertexBuffer[p++] = hollowphane ? -z : z;
+
+						uvs.push(u, v);
+						normals.push(0, 0, 1);
+
+
+						u += du;
+
+					}
+
+					v += dv;
+
+				}
+
+			}
+
+			// Front and back planes faces
+			for (var plane = 0; plane < 2; plane++) {
+
+				for (var j = 0; j < segmentsPerColumn; j++) {
+
+					for (var i = 0; i < segmentsPerRow; i++) {
+
+						var a = i + j * pointsX + plane * pointsPerPlane;
+						var b = a + 1;
+						var c = a + pointsX;
+						var d = c + 1;
+
+						if (plane === 0) {
+
+							indices.push(a, b, c);
+							indices.push(b, d, c);
+							indicesFlipped.push(a, b, c);
+							indicesFlipped.push(b, d, c);
+							// indices.push(a, b, hollowphane ? -c : c);
+							// indices.push(b, d, hollowphane ? -c : c);
+
+						}
+						else {
+
+							indices.push(a, c, b);
+							indices.push(b, c, d);
+							indicesFlipped.push(a, c, b);
+							indicesFlipped.push(b, c, d);
+							// indices.push(a, c, hollowphane ? -b : b);
+							// indices.push(b, c, hollowphane ? -d : d);
+
+						}
+					}
+
+				}
+
+			}
+
+			// Bottom faces
+			for (var i = 0; i < segmentsPerRow; i++) {
+
+				var a = i;
+				var b = a + pointsPerPlane;
+				var c = a + 1;
+				var d = c + pointsPerPlane;
+
+				indices.push(a, b, c);
+				indices.push(b, d, c);
+				indicesFlipped.push(a, b, c);
+				indicesFlipped.push(b, d, c);
+				// indices.push(a, b, hollowphane ? -c : c);
+				// indices.push(b, d, hollowphane ? -c : c);
+
+			}
+
+			// Top faces
+			for (var i = 0; i < segmentsPerRow; i++) {
+
+				var a = pointsX * segmentsPerColumn + i;
+				var b = a + 1;
+				var c = a + pointsPerPlane;
+				var d = b + pointsPerPlane;
+
+				indices.push(a, b, c);
+				indices.push(b, d, c);
+				indicesFlipped.push(a, b, c);
+				indicesFlipped.push(b, d, c);
+				// indices.push(a, b, hollowphane ? -c : c);
+				// indices.push(b, d, hollowphane ? -c : c);
+
+			}
+
+			// Left side faces
+			for (var j = 0; j < segmentsPerColumn; j++) {
+
+				var a = j * pointsX;
+				var b = a + pointsX;
+				var c = a + pointsPerPlane;
+				var d = b + pointsPerPlane;
+
+				indices.push(a, b, c);
+				indices.push(b, d, c);
+				indicesFlipped.push(a, b, c);
+				indicesFlipped.push(b, d, c);
+				// indices.push(a, b, hollowphane ? -c : c);
+				// indices.push(b, d, hollowphane ? -c : c);
+
+			}
+
+			// Right side faces
+			for (var j = 0; j < segmentsPerColumn; j++) {
+
+				var a = j * pointsX + segmentsPerRow;
+				var b = a + pointsX;
+				var c = b + pointsPerPlane;
+				var d = a + pointsPerPlane;
+
+				indices.push(a, c, b);
+				indices.push(a, d, c);
+				indicesFlipped.push(a, c, b);
+				indicesFlipped.push(a, d, c);
+				// indices.push(a, c, hollowphane ? -b : b);
+				// indices.push(a, d, hollowphane ? -c : c);
+
+			}
+
+			geometry.setIndex(indices);
+			geometry.setAttribute('position', new THREE.BufferAttribute(vertexBuffer, 3));
+			geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+			geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+
+			geometryFlipped.setIndex(indicesFlipped);
+			geometryFlipped.setAttribute('position', new THREE.BufferAttribute(vertexBufferFlipped, 3));
+			geometryFlipped.setAttribute('normal', new THREE.Float32BufferAttribute(normalsFlipped, 3));
+			geometryFlipped.setAttribute('uv', new THREE.Float32BufferAttribute(uvsFlipped, 2));
+
+			return [geometry, geometryFlipped];
+		}
+
+		function updateMesh() {
+
+			if (!image) {
+
+				return;
+
+			};
+			scene.remove(theMesh);
+			scene.remove(theMeshFlipped);
+			lithophaneFunctionCylinderSphere(image.width, image.height, imageGrayValues, vertexBuffer, guiData.lithophaneWidth, guiData.xyAngle, guiData.zStartAngle, guiData.zEndAngle);
+			// if (secondMesh) {
+			// 	scene.remove(secondMesh);
+			// 	secondMesh = null;
+			// }
+			var geometry = theMesh.geometry;
+			geometry.computeBoundingBox();
+			geometry.attributes.position.needsUpdate = true;
+			geometry.computeVertexNormals();
+			geometry.center();
+
+			var geometryFlipped = theMeshFlipped.geometry;
+			geometryFlipped.computeBoundingBox();
+			geometryFlipped.attributes.position.needsUpdate = true;
+			geometryFlipped.computeVertexNormals();
+			geometryFlipped.center();
+			// theMeshFlipped.position.z = 40;
+			// theMesh = GDShapes.union(theMesh, theMeshFlipped);
+			// scene.add(theMeshFlipped);
+
+			// // theMesh.updateMatrix();
+			let geo1Dimensions = GDShapes.getDimensions(geometry);
+			// console.log("geo1Dimensions", geo1Dimensions);
+			// let geo2 = geometry.clone();
+			// geo2.applyMatrix4(theMesh.matrix);
+			// // geo2.applyMatrix4(new THREE.Matrix4().makeScale(1, 1, -1));
+			// // geo2.scale(1, 1, -1);
+			// secondMesh = new THREE.Mesh(geo2, GDShapes.getMaterial());
+			// secondMesh.scale.set(1, 1, -1);
+			// // secondMesh.geometry.computeVertexNormals();
+			let moveInset = guiData.hollowInset > 0 ? guiData.hollowInset / 2 : 0;
+			let geo2Dimensions = GDShapes.getDimensions(geometryFlipped);
+			// console.log("geo2Dimensions", geo2Dimensions);
+			theMesh.position.z = -((geo1Dimensions.depth / 2) - moveInset);
+
+			// secondMesh.geometry.center();
+			// console.log("secondMesh.position", secondMesh.position);
+			theMeshFlipped.rotation.set(0, GDShapes.degToRad(180), 0);
+			theMeshFlipped.position.z = (geo2Dimensions.depth / 2) - moveInset;
+
+			// secondMesh.position.z = geo2Dimensions.depth;
+			// console.log("secondMesh.position", secondMesh.position);
+			// // secondMesh.matrixAutoUpdate = false;
+
+
+
+			// // scene.add(secondMesh);
+
+
+			// theMesh = GDShapes.union(theMesh, theMeshFlipped);
+			// let theMeshDimensions = GDShapes.getDimensions(theMesh);
+			// console.log("theMeshDimensions", theMeshDimensions);
+			// theMesh.position.y = theMeshDimensions.height / 2;
+
+
+
+			// let currMaterial = theMesh.material;
+			// scene.remove(theMesh);
+			let cuboidMid = GDShapes.union(theMesh, theMeshFlipped);
+			cuboidMid.geometry.center();
+			// cuboidMid = GDShapes.union(theMesh, secondMesh);
+			// cuboidMid.geometry.computeVertexNormals();
+
+			let cuboidMidDimensions = GDShapes.getDimensions(cuboidMid);
+			// console.log("cuboidMidDimensions", cuboidMidDimensions);
+			let cuboidMidDepthRound = Math.round(cuboidMidDimensions.depth);
+			let cuboidSizeScale = cuboidMidDepthRound / cuboidMidDimensions.depth;
+			// console.log('cuboidSizeScale', cuboidSizeScale);
+			cuboidMid.geometry.scale(cuboidSizeScale, cuboidSizeScale, cuboidSizeScale);
+			cuboidMidDimensions = GDShapes.getDimensions(cuboidMid);
+			// console.log("cuboidMidDimensions", cuboidMidDimensions);
+			let wallWidth = (guiData.hollowphaneWidth - cuboidMidDimensions.width) / 2;
+			let leftBorder = GDShapes.Square({
+				width: wallWidth,
+				depth: cuboidMidDimensions.depth,
+				height: cuboidMidDimensions.height + (guiData.borderBuffer * 2)
+			});
+			leftBorder.position.x = -(cuboidMidDimensions.width / 2 + wallWidth / 2);
+			// console.log("left border", GDShapes.getDimensions(leftBorder));
+			let rightBorder = GDShapes.Square({
+				width: wallWidth,
+				depth: cuboidMidDimensions.depth,
+				height: cuboidMidDimensions.height + (guiData.borderBuffer * 2)
+			});
+			rightBorder.position.x = cuboidMidDimensions.width / 2 + wallWidth / 2;
+
+			let topBorder = GDShapes.Square({
+				width: cuboidMidDimensions.width,
+				depth: cuboidMidDimensions.depth,
+				height: guiData.borderBuffer + 0.001
+			});
+			topBorder.position.y = cuboidMidDimensions.height / 2 + guiData.borderBuffer / 2;
+
+
+			let bottomBorderPlate = GDShapes.Square({
+				width: cuboidMidDimensions.width,
+				depth: cuboidMidDimensions.depth,
+				height: guiData.borderBuffer + 0.001
+			});
+			let bottomBorder;
+			if (guiData.drainHoles) {
+
+				let drainHoleProperties = {
+					radiusTop: guiData.maxThickness / 2,
+					radiusBottom: guiData.maxThickness / 2,
+					height: guiData.borderBuffer + 1,
+					radialSegments: 64,
+					heightSegments: 5
+				}
+				let drainHole1 = GDShapes.Cylinder(drainHoleProperties);
+				let drainHole2 = GDShapes.Cylinder(drainHoleProperties);
+				drainHole1.moveRight(drainHoleProperties.radiusTop + ((cuboidMidDimensions.width / 2) - (drainHoleProperties.radiusTop * 2)));
+				drainHole2.moveLeft(drainHoleProperties.radiusTop + ((cuboidMidDimensions.width / 2) - (drainHoleProperties.radiusTop * 2)));
+				// console.log("drainHole1", GDShapes.getDimensions(drainHole1));
+				let tempBottomBorder = GDShapes.subtract(bottomBorderPlate, drainHole1);
+				bottomBorder = GDShapes.subtract(tempBottomBorder, drainHole2);
+			}
+			else {
+				bottomBorder = bottomBorderPlate;
+			}
+			bottomBorder.position.y = -(cuboidMidDimensions.height / 2 + guiData.borderBuffer / 2);
+
+			// theMesh = bottomBorder;
+			theMesh = GDShapes.union([cuboidMid, leftBorder, rightBorder, topBorder, bottomBorder]);
+			let theMeshDimensions = GDShapes.getDimensions(theMesh);
+			theMesh.position.y = theMeshDimensions.height / 2;
+			if (meshIsTransparent) {
+				theMesh.material.transparent = true;
+				theMesh.material.opacity = 0.5;
+			}
+
+			scene.add(theMesh);
+
+
+
+
+
+
+			// theMesh.position.y += geo1Dimensions.height / 2;
+			// secondMesh.position.y = geo2Dimensions.height / 2;
+			// scene.add(secondMesh);
+			// scene.remove(theMesh);
+			// theMesh = null;
+
+			// obj1.updateMatrix();
+			// obj2.updateMatrix();
+			// let obj1Geometry = obj1.geometry.clone();
+			// obj1Geometry.applyMatrix4(obj1.matrix);
+
+
+			// theMesh.geometry = BufferGeometryUtils.mergeVertices(geometry);
+
+		}
+
+		function lithophaneFunctionCylinderSphere(pointsX, pointsY, imageGrayValues, vertexBuffer, lithophaneWidth, xyAngle, zStartAngle, zEndAngle) {
+
+			//  hollowphaneWidth: 60,
+			// 	hollowphaneDepth: 10,
+			// 	borderBuffer: 5,
+			// 	hollowInset: 0,
+			let maxThickness = guiData.maxThickness / 2;
+			let borderBuffer = guiData.borderBuffer; // 5
+			let depthBuffer = (guiData.hollowphaneDepth / 2) + (guiData.hollowInset / 2);
+			let hollowedImageWidth = guiData.hollowphaneWidth - (borderBuffer * 2);
+			var width = hollowedImageWidth;
+			var width2 = width * 0.5;
+			var aspect = image.height / image.width;
+			var height = width * aspect;
+
+			var axy = (xyAngle * Math.PI / 180);
+			var dAngleXY = axy / (pointsX - 1);
+			var angleXY0 = - axy * 0.5;
+
+			var curvatureXYRadius = 0;
+			if (dAngleXY !== 0) {
+
+				curvatureXYRadius = width2 / Math.sin(Math.min(Math.abs(angleXY0), Math.PI * 0.5));
+
+			}
+
+			var dAngleZ = ((zEndAngle - zStartAngle) * Math.PI / 180) / (pointsY - 1);
+			var angleZ0 = zStartAngle * Math.PI / 180;
+			if (dAngleZ < 0) {
+
+				angleZ0 = zEndAngle * Math.PI / 180;
+				dAngleZ = - dAngleZ;
+
+			}
+			if (maxThickness >= (guiData.hollowphaneDepth / 2)) {
+				maxThickness = (guiData.hollowphaneDepth / 2) - 0.1;
+				guiData.maxThickness = maxThickness;
+			}
+
+			// if (maxThickness < minThickness) {
+
+			// 	var temp = maxThickness;
+			// 	maxThickness = minThickness;
+			// 	minThickness = temp;
+
+			// }
+			// minThickness = 0;
+			// maxThickness = 2.4;
+
+			var innerCurvatureXYRadius = curvatureXYRadius - maxThickness - (depthBuffer > 0 ? (depthBuffer - Math.abs(curvatureXYRadius - maxThickness)) : 0); // -5
+			// var innerCurvatureXYRadius = curvatureXYRadius - maxThickness; // -2.4
+			var dCurvatureXYRadius = maxThickness;
+			var minCurvatureXYRadius = curvatureXYRadius - dCurvatureXYRadius; // -2.4
+			// var minCurvatureXYRadius = curvatureXYRadius - dCurvatureXYRadius - borderBuffer; // -7.4
+
+			var dy = height / (pointsY - 1);
+
+			var p = 0;
+			var pImg = 0;
+			for (var plane = 0; plane < 2; plane++) {
+
+				var angleZ = angleZ0 - Math.PI * 0.5;
+				var y = 0;
+
+				for (var j = 0; j < pointsY; j++) {
+
+					var angleXY = angleXY0;
+
+					for (var i = 0; i < pointsX; i++) {
+
+						var x = 0;
+						var z = 0;
+						var r = 1;
+
+						var xFlipped = 0;
+						var zFlipped = 0;
+						var rFlipped = 1;
+
+						if (dAngleZ !== 0 && dAngleXY !== 0) {
+
+							r *= Math.cos(angleZ);
+							rFlipped *= Math.cos(angleZ);
+
+						}
+
+						if (plane === 0) {
+
+							var grayValueFlipped = imageGrayValuesFlipped[pImg];
+							rFlipped *= grayValueFlipped * dCurvatureXYRadius + minCurvatureXYRadius;
+
+							var grayValue = imageGrayValues[pImg++];
+							r *= grayValue * dCurvatureXYRadius + minCurvatureXYRadius; // ~0.4 * 2.4 + -2.4
+
+
+						}
+						else {
+
+							// r *= innerCurvatureXYRadius;
+							r *= innerCurvatureXYRadius;
+							rFlipped *= innerCurvatureXYRadius;
+
+						}
+
+						if (dAngleXY !== 0) {
+
+							x = Math.sin(angleXY) * r;
+							z = Math.cos(angleXY) * r - curvatureXYRadius;
+
+							xFlipped = Math.sin(angleXY) * rFlipped;
+							zFlipped = Math.cos(angleXY) * rFlipped - curvatureXYRadius;
+
+							angleXY += dAngleXY;
+
+						}
+						else {
+
+							x = width * (i / pointsX - 0.5);
+							z = r;
+
+							xFlipped = width * (i / pointsX - 0.5);
+							zFlipped = rFlipped;
+
+						}
+						// if (y==dy*10) {
+						// console.log(`(${x},${y},${z})`);
+						// }
+
+						vertexBufferFlipped[p] = xFlipped;
+						vertexBufferFlipped[p + 1] = y;
+						vertexBufferFlipped[p + 2] = zFlipped;
+
+						vertexBuffer[p++] = x;
+						vertexBuffer[p++] = y;
+						vertexBuffer[p++] = z;
+
+					}
+
+					angleZ += dAngleZ;
+					y += dy;
+
+				}
+				// console.log('plane', plane);
+				// break;
+
+			}
+
+		}
+
+		function saveSTL() {
+
+			if (!image) {
+
+				alert("No  image loaded. Please click on Load image button first :-)");
+				return;
+
+			}
+			// exportBinary();
+
+			var stlExporter = new STLExporterOptimized();
+
+			var stlFileBytes = stlExporter.parse(theMesh, { binary: true });
+
+			var link = window.document.createElement("a");
+			link.href = window.URL.createObjectURL(new Blob([stlFileBytes]), { type: "model/stl" });
+			link.download = "Hollowphane_" + imageName + ".stl";
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+
+		}
+
+		function exportBinary() {
+			let result = exporterSTL.parse(scene, { binary: true });
+			// let result = this.exporterSTL.parse(this.scene, { binary: true });
+			let blob = new Blob([result], { type: 'application/octet-stream' });
+			let saveLink = document.createElement('a');
+			saveLink.style.display = "none";
+			document.body.appendChild(saveLink);
+			saveLink.href = URL.createObjectURL(blob);
+			saveLink.download = `hollowphane_${imageName}.stl`;
+			saveLink.click();
+			document.body.removeChild(saveLink);
+			// console.log('exportScene?', exportScene.toJson());
+			// exportScene.dispose();
+		}
+
+		// function viewSource() {
+
+		// 	document.location = "https://github.com/yomboprime/lithofun";
+
+		// }
+
+		function setInfo(message) {
+
+			info.innerText = message;
+
+			info.style.backgroundColor = "black";
+			info.style.display = "block";
+			info.style.position = "absolute";
+			info.style.bottom = "0%";
+			info.style.right = "0%";
+			info.style.textAlign = "right";
+
+		}
+
+		// from http://stackoverflow.com/questions/260857/changing-website-favicon-dynamically
+		function changeFavicon(src) {
+
+			var link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+			link.type = 'image/x-icon';
+			link.rel = 'shortcut icon';
+			link.href = src;
+			document.getElementsByTagName('head')[0].appendChild(link);
+
+		}
+
+		function onWindowResize() {
+
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+
+			renderer.setSize(window.innerWidth, window.innerHeight);
+
+		}
+
+		function animate() {
+
+			requestAnimationFrame(animate);
+
+			renderer.render(scene, camera);
+
+			// stats.update();
+
+		}
+
+	</script>
+</body>
+
+</html>
