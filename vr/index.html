@@ -1,0 +1,783 @@
+<html lang="en">
+
+<head>
+    <title>three.js vr</title>
+    <meta charset="utf-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style type="text/css">
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: Monospace;
+            font-size: 13px;
+            line-height: 24px;
+            overscroll-behavior: none;
+        }
+
+        a {
+            color: #ff0;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        button {
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        #info {
+            position: absolute;
+            top: 0px;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            -moz-user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            pointer-events: none;
+            z-index: 1;
+            /* TODO Solve this in HTML */
+        }
+
+        a,
+        button,
+        input,
+        select {
+            pointer-events: auto;
+        }
+
+        .lil-gui {
+            z-index: 2 !important;
+            /* TODO Solve this in HTML */
+        }
+
+        @media all and (max-width: 640px) {
+            .lil-gui.root {
+                right: auto;
+                top: auto;
+                max-height: 50%;
+                max-width: 80%;
+                bottom: 0;
+                left: 0;
+            }
+        }
+
+        #overlay {
+            position: absolute;
+            font-size: 16px;
+            z-index: 2;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        #overlay button {
+            background: transparent;
+            border: 0;
+            border: 1px solid rgb(255, 255, 255);
+            border-radius: 4px;
+            color: #ffffff;
+            padding: 12px 18px;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        #notSupported {
+            width: 50%;
+            margin: auto;
+            background-color: #f00;
+            margin-top: 20px;
+            padding: 10px;
+        }
+    </style>
+    <script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./three.module.js",
+                "OctreeCSG/": "./OctreeCSG/",
+                "three-mesh-ui": "./three-mesh-ui.module.js"
+            }
+        }
+    </script>
+    <!-- <script type="text/javascript" src="threejs.js"></script> -->
+</head>
+
+<body>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from './OrbitControls.js';
+        import { VRButton } from './VRButton.js';
+        import { XRControllerModelFactory } from './XRControllerModelFactory.js';
+        import { STLLoader } from './STLLoader.js';
+        import { GLTFLoader } from './GLTFLoader.js';
+        import { FontLoader } from './FontLoader.js';
+        import { TextGeometry } from './TextGeometry.js';
+        import * as ThreeMeshUI from "three-mesh-ui";
+
+        import OctreeCSG from 'OctreeCSG/OctreeCSG.js';
+
+        const stlLoader = new STLLoader();
+        const gltfLoader = new GLTFLoader();
+        const fontLoader = new FontLoader();
+
+        function loadFont(path) {
+            return new Promise((resolve, reject) => {
+                try {
+                    fontLoader.load(path, resolve);
+                }
+                catch (e) {
+                    reject(e);
+                }
+            });
+        }
+        function loadSTL(path) {
+            return new Promise((resolve, reject) => {
+                try {
+                    stlLoader.load(path, resolve);
+                }
+                catch (e) {
+                    reject(e);
+                }
+            });
+        }
+        function loadGLTF(path) {
+            return new Promise((resolve, reject) => {
+                try {
+                    gltfLoader.load(path, resolve);
+                }
+                catch (e) {
+                    reject(e);
+                }
+            });
+        }
+        function buildWalls() {
+            let baseMaterial = new THREE.MeshStandardMaterial({ color: 0x3e3e3e });
+
+            let leftWallGeometry = new THREE.BoxGeometry(2, 120, 300);
+            let rightWallGeometry = new THREE.BoxGeometry(2, 120, 300);
+            let backWallGeometry = new THREE.BoxGeometry(200, 120, 2);
+            let frontWallGeometry = new THREE.BoxGeometry(200, 120, 2);
+            let windowGeometry = new THREE.BoxGeometry(60, 50, 4);
+            let doorGeometry = new THREE.BoxGeometry(55, 100, 4);
+
+            let leftWall = new THREE.Mesh(leftWallGeometry, baseMaterial);
+            let rightWall = new THREE.Mesh(rightWallGeometry, baseMaterial);
+            let backWall = new THREE.Mesh(backWallGeometry, baseMaterial);
+            let frontWall = new THREE.Mesh(frontWallGeometry, baseMaterial);
+            let window = new THREE.Mesh(windowGeometry, baseMaterial.clone());
+            let door = new THREE.Mesh(doorGeometry, baseMaterial);
+
+            leftWall.position.x = -99;
+            rightWall.position.x = 99;
+            backWall.position.z = -149;
+            frontWall.position.z = 149;
+            window.position.set(-99, 15, 60);
+            door.position.set(99, -10, -80);
+            window.rotation.set(0, THREE.MathUtils.degToRad(-90), 0);
+            door.rotation.set(0, THREE.MathUtils.degToRad(-90), 0);
+            // scene.add(window);
+            let result = OctreeCSG.operation({
+                op: "union",
+                material: leftWall.material,
+                objA: {
+                    op: "union",
+                    objA: frontWall,
+                    objB: backWall
+                },
+                objB: {
+                    op: "union",
+                    objA: {
+                        op: "subtract",
+                        objA: rightWall,
+                        objB: door
+                    },
+                    objB: {
+                        op: "subtract",
+                        objA: leftWall,
+                        objB: window
+                    }
+                }
+            });
+
+            // console.log(result, result.geometry.index.count / 3);
+            // result.rotation.set(0, THREE.MathUtils.degToRad(-90), 0);
+            // scene.add(result);
+            return result;
+
+
+            // let door = Shapes.Cube({
+            //     width: 55,
+            //     height: 100,
+            //     depth: 4
+            // });
+            // door.material.color.set(0x0000ff);
+            // door.position.set(-80, -10, -100);
+            // scene.add(door);
+        }
+        function getDimensions(geometry) {
+            geometry = geometry.geometry ? geometry.geometry : geometry;
+            geometry.computeBoundingBox();
+            let dimensions = new THREE.Vector3().subVectors(geometry.boundingBox.max, geometry.boundingBox.min);
+            return {
+                width: dimensions.x,
+                height: dimensions.y,
+                depth: dimensions.z
+            };
+        }
+        function setMeshName(obj, name, recursive = true) {
+            try {
+                obj.name = name;
+            }
+            catch (e) { };
+            if (recursive) {
+                obj.children.forEach(child => setMeshName(child, name, recursive));
+            }
+        }
+        function createTextBox() {
+            ui_container = new ThreeMeshUI.Block({
+                width: 50,
+                height: 20,
+                padding: 0.2,
+                justifyContent: 'start',
+                textAlign: 'left',
+                fontFamily: './fonts/Roboto-msdf.json',
+                fontTexture: './fonts/Roboto-msdf.png',
+            });
+
+            //
+
+            ui_text = new ThreeMeshUI.Text({
+                content: "Inital Text",
+                fontSize: 2
+            });
+
+            ui_container.add(ui_text);
+            // ui_container.position.set(30, 60, 50);
+            // scene is a THREE.Scene (see three.js)
+            // console.log("text", ui_text);
+            // console.log("ui_container", ui_container);
+            ui_container.visible = false;
+            scene.add(ui_container);
+        }
+        function changeUIText(text, position) {
+            ui_text.set({ content: text });
+            if (position) {
+                ui_container.position.copy(position);
+            }
+            // console.log('updated ui_text', ui_text, ui_container);
+        }
+        function showUIBox() {
+            ui_container.visible = true;
+        }
+        function hideUIBox() {
+            ui_container.visible = false;
+        }
+        let container;
+        let ui_container, ui_text;
+        let camera, scene, renderer;
+        let controller1, controller2;
+        let controllerGrip1, controllerGrip2;
+
+        let raycaster;
+        let VRSupported = true;
+        let pointer = new THREE.Vector2();
+        const intersected = [];
+        const tempMatrix = new THREE.Matrix4();
+
+        let controls, group;
+        let skyboxGeo, skybox;
+        let mixer;
+        const cameraGroup = new THREE.Group();
+        const skyboxBasePath = './textures/skybox';
+        const skyboxSides = ["right", "left", "up", "down", "front", "back"];
+
+        const interactions = [
+            {
+                page: 0,
+                pages: [
+                    "Hello 1"
+                ]
+            },
+            {
+                page: 0,
+                pages: [
+                    "Hello 2"
+                ]
+            },
+            {
+                page: 0,
+                pages: [
+                    "Hello 3"
+                ]
+            }
+
+        ];
+
+        init().then(start).then(animate);
+
+        async function init() {
+            container = document.createElement('div');
+            document.body.appendChild(container);
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 5000);
+            camera.position.set(0, 80, 120);
+            camera.lookAt(0, 180, 0);
+
+            cameraGroup.position.set(0, 80, 120);  // Set the initial VR Headset Position.
+            controls = new OrbitControls(camera, container);
+            controls.target.set(0, 70, 80);
+            // controls.maxDistance = 130;
+            controls.enableZoom = false;
+            controls.update();
+
+            let hemisphereLight = new THREE.HemisphereLight(0x808080, 0x606060);
+            // hemisphereLight.position.y = wallsDimensions.height;
+            scene.add(hemisphereLight);
+            const light = new THREE.DirectionalLight(0xffffff);
+            light.position.set(-250, 400, 0);
+            light.castShadow = true;
+            light.shadow.camera.top = 2;
+            light.shadow.camera.bottom = - 2;
+            light.shadow.camera.right = 2;
+            light.shadow.camera.left = - 2;
+            light.shadow.mapSize.set(4096, 4096);
+            scene.add(light);
+
+
+            skyboxGeo = new THREE.BoxGeometry(5000, 5000, 5000);
+            let skyboxMaterialArray = createSkyboxMaterialArray('UnionSquare', '.jpg');
+            skybox = new THREE.Mesh(skyboxGeo, skyboxMaterialArray);
+            // skybox.position.y = 2500;
+            scene.add(skybox);
+
+
+            const textureLoader = new THREE.TextureLoader();
+            const wallsColorTexture = textureLoader.load('./textures/wall/color.jpg');
+            const wallsAmbientOcclusionTexture = textureLoader.load('./textures/wall/ambientOcclusion.jpg');
+            const wallsNormalTexture = textureLoader.load('./textures/wall/normal.jpg');
+            const wallsRoughnessTexture = textureLoader.load('./textures/wall/roughness.jpg');
+
+            const wallTexturesobj = {
+                wallsAmbientOcclusionTexture,
+                wallsColorTexture,
+                wallsNormalTexture,
+                wallsRoughnessTexture
+            };
+
+            Object.values(wallTexturesobj).forEach((texture) => {
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(0.75, 0.75);
+            });
+
+            // let wallsGeometry = await loadSTL('./models/walls.stl');
+            // wallsGeometry.center();
+            let walls = buildWalls();
+            walls.material = new THREE.MeshStandardMaterial({
+                // color: 0xeeeeee,
+                aoMap: wallsAmbientOcclusionTexture,
+                normalMap: wallsNormalTexture,
+                roughnessMap: wallsRoughnessTexture,
+                map: wallsColorTexture
+            });
+            // let walls = new THREE.Mesh(wallsGeometry, new THREE.MeshStandardMaterial({
+            //     // color: 0xeeeeee,
+            //     aoMap: wallsAmbientOcclusionTexture,
+            //     normalMap: wallsNormalTexture,
+            //     roughnessMap: wallsRoughnessTexture,
+            //     map: wallsColorTexture
+            // }));
+            walls.geometry.setAttribute(
+                "uv2",
+                new THREE.Float32BufferAttribute(walls.geometry.attributes.uv.array, 2)
+            );
+            // Rotation positive x = lifts the back up
+            // Rotation positive y = Rotates counter clockwise
+            // Rotation positive z = lifts right side up
+            // do negative number or (360 - degree) for opposite rotation / left
+            // walls.rotation.set(0, THREE.MathUtils.degToRad(-90), 0);
+            let wallsDimensions = getDimensions(walls);
+            walls.position.y = wallsDimensions.height / 2;
+            scene.add(walls);
+
+            // console.log(walls, wallsDimensions);
+            // let gltfWall = await loadGLTF('./models/walls.glb');
+            // console.log("gltfWall", gltfWall);
+
+
+            const floorTexture = textureLoader.load('./textures/floor/floor.jpg');
+
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(4, 4);
+
+            // walls.material = new THREE.MeshStandardMaterial({
+            //     // color: 0xeeeeee,
+            //     aoMap: wallsAmbientOcclusionTexture,
+            //     normalMap: wallsNormalTexture,
+            //     roughnessMap: wallsRoughnessTexture,
+            //     map: wallsColorTexture
+            // });
+            const floorGeometry = new THREE.PlaneGeometry(wallsDimensions.width - 1, wallsDimensions.depth - 1);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                color: 0xeeeeee,
+                map: floorTexture
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = - Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceilingGeometry = new THREE.PlaneGeometry(wallsDimensions.width - 1, wallsDimensions.depth - 1);
+            const ceilingMaterial = new THREE.MeshStandardMaterial({
+                color: 0xeeeeee,
+                roughness: 0.7,
+                metalness: 0.0
+            });
+            const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.receiveShadow = true;
+            ceiling.position.y = wallsDimensions.height;
+            scene.add(ceiling);
+
+
+            let font = await loadFont('./fonts/droid/droid_serif_bold.typeface.json');
+            // console.log('font', font);
+            let textGeometry = new TextGeometry('Gilad Tech Lounge', {
+                font: font,
+                size: 14,
+                height: 3,
+                curveSegments: 12,
+                bevelEnabled: false,
+                bevelThickness: 10,
+                bevelSize: 8,
+                bevelOffset: 0,
+                bevelSegments: 5
+            });
+            const textMaterial = new THREE.MeshStandardMaterial({
+                color: 0x283E41,
+                roughness: 0,
+                metalness: 0.0
+            });
+            let textMesh = new THREE.Mesh(textGeometry, textMaterial);
+            textMesh.geometry.center();
+            textMesh.position.set(0, 90, -148);
+            scene.add(textMesh);
+            let tableGeometry = await loadSTL('./models/table.stl');
+            let tableMaterial = new THREE.MeshStandardMaterial({
+                color: 0xF46519,
+                roughness: 0.0,
+                metalness: 0.0
+            });
+            let table = new THREE.Mesh(tableGeometry, tableMaterial);
+            table.position.set(0, 0, 60);
+            scene.add(table);
+            group = new THREE.Group();
+
+            createTextBox();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+                    if (supported) {
+                        const vrButtonDOM = VRButton.createButton(renderer);
+                        document.body.appendChild(vrButtonDOM);
+                        console.log("vrButtonDOM", vrButtonDOM);
+
+                        // controllers
+                        controller1 = renderer.xr.getController(0);
+                        controller1.addEventListener('selectstart', onSelectStart);
+                        controller1.addEventListener('selectend', onSelectEnd);
+                        scene.add(controller1);
+
+                        controller2 = renderer.xr.getController(1);
+                        controller2.addEventListener('selectstart', onSelectStart);
+                        controller2.addEventListener('selectend', onSelectEnd);
+                        scene.add(controller2);
+
+                        const controllerModelFactory = new XRControllerModelFactory();
+                        controllerGrip1 = renderer.xr.getControllerGrip(0);
+                        controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
+                        scene.add(controllerGrip1);
+
+                        controllerGrip2 = renderer.xr.getControllerGrip(1);
+                        controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
+                        scene.add(controllerGrip2);
+
+                        //
+
+                        const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, - 1)]);
+
+                        const line = new THREE.Line(geometry);
+                        line.name = 'line';
+                        line.scale.z = 5;
+
+                        controller1.add(line.clone());
+                        controller2.add(line.clone());
+                        //When user turn on the VR mode.
+                        renderer.xr.addEventListener('sessionstart', function () {
+                            scene.add(cameraGroup);
+                            cameraGroup.add(camera);
+                        });
+                        //When user turn off the VR mode.
+                        renderer.xr.addEventListener('sessionend', function () {
+                            scene.remove(cameraGroup);
+                            cameraGroup.remove(camera);
+                        });
+                    }
+                    else {
+                        VRSupported = false;
+                    }
+
+                }).catch(() => {
+                    VRSupported = false;
+                });
+            }
+            else {
+                VRSupported = false;
+            }
+
+
+            raycaster = new THREE.Raycaster();
+
+            //
+            document.addEventListener('pointerup', onMouseClick);
+            window.addEventListener('resize', onWindowResize);
+
+        }
+        async function start() {
+            let stickmanGeometry = await loadSTL('./models/stickman.stl');
+            let stickmanMaterial = new THREE.MeshStandardMaterial({
+                color: 0x283E41,
+                roughness: 0.0,
+                metalness: 0.0
+            });
+            let stickman = new THREE.Mesh(stickmanGeometry, stickmanMaterial);
+            let stickman2 = new THREE.Mesh(stickmanGeometry.clone(), stickmanMaterial.clone());
+            let stickman3 = new THREE.Mesh(stickmanGeometry.clone(), stickmanMaterial.clone());
+            stickman2.position.x += 40;
+            stickman3.position.x -= 40;
+            // setMeshName(stickman, "model_1");
+            // setMeshName(stickman2, "model_2");
+            stickman.dimensions = getDimensions(stickman);
+            stickman2.dimensions = getDimensions(stickman2);
+            stickman3.dimensions = getDimensions(stickman3);
+            stickman.interaction = interactions.shift();
+            stickman2.interaction = interactions.shift();
+            stickman3.interaction = interactions.shift();
+            group.add(stickman);
+            group.add(stickman2);
+            group.add(stickman3);
+
+
+            scene.add(group);
+        }
+        function objIntersected(obj) {
+            obj.material.color.set(Math.floor(Math.random() * 16777215));
+            if (obj.interaction) {
+                // console.log('obj.interaction', obj.interaction);
+                let text = obj.interaction.pages[obj.interaction.page];
+                // console.log("new text:", text);
+                let uiPosition = obj.position.clone();
+                uiPosition.x += obj.dimensions.width + 12;
+                uiPosition.y += obj.dimensions.height + 12;
+                uiPosition.z += obj.dimensions.depth / 2;
+
+                changeUIText(text, uiPosition);
+                showUIBox();
+            }
+        }
+        function onMouseClick(event) {
+            // console.log(event);
+            // console.log("event xy", event.clientX, event.clientY);
+            pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            // console.log("pointer xy", pointer.x, pointer.y);
+            // camera.updateMatrixWorld();
+            raycaster.setFromCamera(pointer, camera);
+            const intersections = raycaster.intersectObjects(group.children, true);
+            if (intersections.length > 0) {
+
+                const intersection = intersections[0];
+
+                const object = intersection.object;
+                // console.log("Intersecting:", object);
+                objIntersected(object);
+                // object.material.color.set(Math.floor(Math.random() * 16777215));
+
+
+
+                // controller.attach(object);
+
+                // controller.userData.selected = object;
+
+            }
+            else {
+                hideUIBox();
+            }
+
+        }
+        function onWindowResize() {
+
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+        }
+
+        function onSelectStart(event) {
+
+            const controller = event.target;
+
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+
+                const intersection = intersections[0];
+
+                const object = intersection.object;
+
+                // object.material.emissive.b = 1;
+                // controller.attach(object);
+
+                controller.userData.selected = object;
+
+            }
+            else {
+                hideUIBox();
+            }
+
+        }
+
+        function onSelectEnd(event) {
+
+            const controller = event.target;
+
+            if (controller.userData.selected !== undefined) {
+
+                const object = controller.userData.selected;
+                if (object) {
+                    objIntersected(object);
+                }
+                // object.material.emissive.b = 0;
+                // group.attach(object);
+
+                controller.userData.selected = undefined;
+
+            }
+
+
+        }
+
+        function getIntersections(controller) {
+
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, - 1).applyMatrix4(tempMatrix);
+
+            return raycaster.intersectObjects(group.children, false);
+
+        }
+
+        function intersectObjects(controller) {
+
+            // Do not highlight when already selected
+
+            if (controller.userData.selected !== undefined) return;
+
+            const line = controller.getObjectByName('line');
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+
+                const intersection = intersections[0];
+
+                const object = intersection.object;
+                object.material.emissive.r = 1;
+                intersected.push(object);
+
+                line.scale.z = intersection.distance;
+
+            } else {
+
+                line.scale.z = 5;
+
+            }
+
+        }
+
+        function cleanIntersected() {
+
+            while (intersected.length) {
+
+                const object = intersected.pop();
+                object.material.emissive.r = 0;
+
+            }
+
+        }
+
+        //
+
+        function animate() {
+            // console.log("animate");
+            requestAnimationFrame(animate);
+            ThreeMeshUI.update();
+            renderer.setAnimationLoop(render);
+
+
+        }
+
+        function render() {
+            // cleanIntersected();
+
+            // intersectObjects(controller1);
+            // intersectObjects(controller2);
+
+            renderer.render(scene, camera);
+
+        }
+
+        function createSkyboxPathArray(skyboxName, fileType = ".png") {
+            let baseFilePath = skyboxBasePath + '/' + skyboxName + '/' + skyboxName + '_';
+            // let returnArray = [];
+            return skyboxSides.map(side => {
+                return baseFilePath + side + fileType;
+            });
+        }
+        function createSkyboxMaterialArray(skyboxPathArray, fileType = ".png") {
+            if (!Array.isArray(skyboxPathArray)) {
+                skyboxPathArray = createSkyboxPathArray(skyboxPathArray, fileType);
+            }
+            return skyboxPathArray.map(image => {
+                let texture = new THREE.TextureLoader().load(image);
+                return new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+            });
+        }
+    </script>
+</body>
+
+</html>
