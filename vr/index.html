@@ -1,7 +1,7 @@
 <html lang="en">
 
 <head>
-    <title>three.js vr</title>
+    <title>Gilad Tech Lounge</title>
     <meta charset="utf-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
@@ -503,7 +503,7 @@
                     if (supported) {
                         const vrButtonDOM = VRButton.createButton(renderer);
                         document.body.appendChild(vrButtonDOM);
-                        console.log("vrButtonDOM", vrButtonDOM);
+                        // console.log("vrButtonDOM", vrButtonDOM);
 
                         // controllers
                         controller1 = renderer.xr.getController(0);
@@ -527,14 +527,19 @@
 
                         //
 
-                        const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, - 1)]);
+                        const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -10)]);
 
                         const line = new THREE.Line(geometry);
                         line.name = 'line';
-                        line.scale.z = 5;
-
+                        line.scale.z = 50;
+                        // line.position.copy(cameraGroup);
                         controller1.add(line.clone());
                         controller2.add(line.clone());
+                        cameraGroup.add(controller1);
+                        cameraGroup.add(controller2);
+                        // controller1.position.copy(cameraGroup.position);
+                        // controller2.position.copy(cameraGroup.position);
+                        console.log('controller1', controller1);
                         //When user turn on the VR mode.
                         renderer.xr.addEventListener('sessionstart', function () {
                             scene.add(cameraGroup);
@@ -745,13 +750,13 @@
         function animate() {
             // console.log("animate");
             requestAnimationFrame(animate);
-            ThreeMeshUI.update();
             renderer.setAnimationLoop(render);
-
-
+            
+            
         }
-
+        
         function render() {
+            ThreeMeshUI.update();
             // cleanIntersected();
 
             // intersectObjects(controller1);
